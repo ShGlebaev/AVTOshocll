@@ -1,7 +1,11 @@
 from tkinter import *
 from tkinter import messagebox as mb
+from tkinter import filedialog
 from tkinter import ttk
 import sqlite3 as sq
+from io import BytesIO
+
+import PIL
 from PIL import ImageTk, Image
 
 from tkcalendar import *
@@ -13,6 +17,7 @@ with sq.connect("databaz") as db:
     c.execute(""" CREATE TABLE IF NOT EXISTS people (
     ID INTEGER,
     password TEXT,
+    photo BLOB,
     F TEXT,
     I TEXT,
     O TEXT,
@@ -104,10 +109,17 @@ def main_screen(root):
         Label(root, text="Неизвестная роль").pack()
 
 
-def add_user(id, password, surname, name, patronymic, post):
+def add_user(id, password, surname, name, patronymic, post, photo_path):
     with sq.connect("databaz") as db:
         c = db.cursor()
-        c.execute("INSERT INTO people (ID, password, F, I, O, POST) VALUES (?, ?, ?, ?, ?, ?)", (id, password, surname, name, patronymic, post))
+
+        # Загрузка фотографии из файла
+        with open(photo_path, 'rb') as file:
+            photo_data = file.read()
+
+        # Вставка данных пользователя в базу данных
+        c.execute("INSERT INTO people (ID, password, F, I, O, POST, photo) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                  (id, password, surname, name, patronymic, post, photo_data))
         db.commit()
 
 
@@ -135,13 +147,26 @@ def user_add():
     patronymic_entry = Entry(second)
     patronymic_entry.pack()
 
+    Label(second, text="Фотография:").pack()
+    photo_entry = Entry(second)
+    photo_entry.pack()
+    photo_btn = Button(second, text="...", command=lambda: select_file(photo_entry))
+    photo_btn.place(x=137, y=239)
+
     Label(second, text="Должность:").pack()
     post_combobox = ttk.Combobox(second, values=["Администратор", "Преподаватель", "Преподаватель-инструктор", "Студент"])
     post_combobox.pack()
 
     Button(second, text="Добавить", command=lambda: add_user(id_entry.get(), password_entry.get(), surname_entry.get(),
                                                            name_entry.get(),
-                                    patronymic_entry.get(), post_combobox.get())).pack()
+                                    patronymic_entry.get(), post_combobox.get(), photo_entry.get())).pack()
+
+
+def select_file(photo_entry):
+    file_path = filedialog.askopenfilename()
+
+    photo_entry.delete(0, 'end')
+    photo_entry.insert(0, file_path)
 
 
 def show_users():
@@ -197,8 +222,32 @@ def show_users():
 
 def admin_screan(root):
     clear_screen(root)
-    root.title("")
+    root.title("Меню администратора")
     Label(root, text="Профиль администратора").pack()
+
+    with sq.connect("databaz") as db:
+        c = db.cursor()
+        c.execute("SELECT F, I, O, photo FROM people WHERE ID = ?", (current_user['ID'],))
+        user_info = c.fetchone()
+
+    full_name = f"{user_info[0]} {user_info[1]} {user_info[2]}"
+
+    try:
+        photo = Image.open(BytesIO(user_info[3]))
+    except PIL.UnidentifiedImageError:
+        print("Unable to open image")
+        photo = None
+
+    Label(root, text=f"Добро пожаловать, {full_name}!").pack()
+
+    if photo is not None:
+        photo_frame = Frame(root)
+        photo_frame.pack()
+        photo_label = Label(photo_frame)
+        photo_label.pack()
+        photo_image = ImageTk.PhotoImage(photo)
+        photo_label.config(image=photo_image)
+        photo_label.image = photo_image
 
     menu_admin = Menu(root)
     root.config(menu=menu_admin)
@@ -229,19 +278,20 @@ def open_calendar():
     Button(calendar_window, text="Обновить", command=lambda: display(event_text)).pack()
 
 
-def the_memo():
+def the_memo(file_path='Meno.txt'):
     meno_scrin = Toplevel()
     meno_scrin.title("Памятка")
     Label(meno_scrin, text="Памятка по добовлению пользователей").pack()
     try:
-        with open("Meno.txt", "r") as file:
+        with open(file_path, "r", encoding='utf-8') as file:
             text = file.read()
         text_field = Text(meno_scrin)
         text_field.insert('1.0', text)
+        text_field.configure(state='disabled')
         text_field.pack()
     except IOError as e:
         print(f"Ошибка при чтении файла: {e}")
-    Button(meno_scrin, text="Вернуться", command=back).place(relx=1.0, rely=0.0, anchor='ne')
+    #Button(meno_scrin, text="Вернуться", command=back).place(relx=1.0, rely=0.0, anchor='ne')
 
 
 def back():
@@ -339,6 +389,30 @@ def teacher_screan(root):
     clear_screen(root)
     Label(root, text="Профиль преподавателя").pack()
 
+    with sq.connect("databaz") as db:
+        c = db.cursor()
+        c.execute("SELECT F, I, O, photo FROM people WHERE ID = ?", (current_user['ID'],))
+        user_info = c.fetchone()
+
+    full_name = f"{user_info[0]} {user_info[1]} {user_info[2]}"
+
+    try:
+        photo = Image.open(BytesIO(user_info[3]))
+    except PIL.UnidentifiedImageError:
+        print("Unable to open image")
+        photo = None
+
+    Label(root, text=f"Добро пожаловать, {full_name}!").pack()
+
+    if photo is not None:
+        photo_frame = Frame(root)
+        photo_frame.pack()
+        photo_label = Label(photo_frame)
+        photo_label.pack()
+        photo_image = ImageTk.PhotoImage(photo)
+        photo_label.config(image=photo_image)
+        photo_label.image = photo_image
+
     # Добавляем кнопку выхода из аккаунта
     logout_button = Button(root, text="Выйти", command=lambda: logout(root))
     logout_button.place(relx=1.0, rely=0.0, anchor='ne')
@@ -348,6 +422,30 @@ def instructor_screan(root):
     clear_screen(root)
     Label(root, text="Профиль преподавателя-инструктора").pack()
 
+    with sq.connect("databaz") as db:
+        c = db.cursor()
+        c.execute("SELECT F, I, O, photo FROM people WHERE ID = ?", (current_user['ID'],))
+        user_info = c.fetchone()
+
+    full_name = f"{user_info[0]} {user_info[1]} {user_info[2]}"
+
+    try:
+        photo = Image.open(BytesIO(user_info[3]))
+    except PIL.UnidentifiedImageError:
+        print("Unable to open image")
+        photo = None
+
+    Label(root, text=f"Добро пожаловать, {full_name}!").pack()
+
+    if photo is not None:
+        photo_frame = Frame(root)
+        photo_frame.pack()
+        photo_label = Label(photo_frame)
+        photo_label.pack()
+        photo_image = ImageTk.PhotoImage(photo)
+        photo_label.config(image=photo_image)
+        photo_label.image = photo_image
+
     # Добавляем кнопку выхода из аккаунта
     logout_button = Button(root, text="Выйти", command=lambda: logout(root))
     logout_button.place(relx=1.0, rely=0.0, anchor='ne')
@@ -356,6 +454,30 @@ def instructor_screan(root):
 def student_screan(root):
     clear_screen(root)
     Label(root, text="Профиль студента").pack()
+
+    with sq.connect("databaz") as db:
+        c = db.cursor()
+        c.execute("SELECT F, I, O, photo FROM people WHERE ID = ?", (current_user['ID'],))
+        user_info = c.fetchone()
+
+    full_name = f"{user_info[0]} {user_info[1]} {user_info[2]}"
+
+    try:
+        photo = Image.open(BytesIO(user_info[3]))
+    except PIL.UnidentifiedImageError:
+        print("Unable to open image")
+        photo = None
+
+    Label(root, text=f"Добро пожаловать, {full_name}!").pack()
+
+    if photo is not None:
+        photo_frame = Frame(root)
+        photo_frame.pack()
+        photo_label = Label(photo_frame)
+        photo_label.pack()
+        photo_image = ImageTk.PhotoImage(photo)
+        photo_label.config(image=photo_image)
+        photo_label.image = photo_image
 
     # Добавляем кнопку выхода из аккаунта
     logout_button = Button(root, text="Выйти", command=lambda: logout(root))
