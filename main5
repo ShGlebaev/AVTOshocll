@@ -1,0 +1,855 @@
+from tkinter import *
+from tkinter import messagebox as mb
+from tkinter import filedialog
+from tkinter import ttk
+import sqlite3 as sq
+from io import BytesIO
+import os
+
+import PIL
+from PIL import ImageTk, Image
+
+from tkcalendar import *
+
+import csv
+from openpyxl import Workbook
+
+current_user = None
+
+with sq.connect("databaz.db") as db:
+    c = db.cursor()
+    c.execute(""" CREATE TABLE IF NOT EXISTS people (
+    ID INTEGER,
+    Пароль TEXT,
+    Фотография BLOB,
+    Фамилия TEXT,
+    Имя TEXT,
+    Отчество TEXT,
+    Должность TEXT
+    ) """)
+
+with sq.connect("databaz.db") as db:
+    c = db.cursor()
+    c.execute(""" CREATE TABLE IF NOT EXISTS time (
+    Название_экзамена TEXT,
+    Дата INTEGER
+    ) """)
+
+with sq.connect("databaz.db") as db:
+    c = db.cursor()
+    c.execute(""" CREATE TABLE IF NOT EXISTS student (
+    ID INTEGER,
+    Фамилия TEXT,
+    Имя TEXT,
+    Отчество TEXT,
+    Первая_контрольная_точка TEXT, 
+    Вторая_контрольная_точка TEXT,
+    Третья_контрольная_точка TEXT,
+    Четвертая_контрольная_точка TEXT,
+    Внутренний_экзамен TEXT,
+    Экзамен_в_ГАИ TEXT
+    ) """)
+
+
+def login_screan(root):
+    clear_screen(root)
+    Label(root, text="Авторизация").pack()
+    Label(root, text="Введите ID:").pack()
+    ID_entry = Entry(root)
+    ID_entry.pack()
+    Label(root, text="Пароль:").pack()
+    password_entry = Entry(root, show="*")
+    password_entry.pack()
+    togle = Button(root, text="Показать", command=lambda: toggle_password(password_entry, togle))
+    togle.place(x=265, y=80)
+    Button(root, text="Войти", command=lambda: login(root, ID_entry.get(), password_entry.get())).pack()
+
+    root.bind("<b>", lambda event: user_add())
+
+
+def toggle_password(password_entry, togle):
+    if password_entry.cget("show") == "*":
+        password_entry.config(show="")
+    else:
+        password_entry.config(show="*")
+
+
+def login(root, ID_entry, password_entry):
+    global current_user
+    if not ID_entry or not password_entry:
+        mb.showerror("Ошибка", "Вы не ввели логин или пароль!")
+    else:
+        with sq.connect("databaz.db") as db:
+            c = db.cursor()
+            c.execute("SELECT * FROM people WHERE ID=? AND Пароль=?", (ID_entry, password_entry))
+            user = c.fetchone()
+            if user:
+                current_user = {
+                    'ID': user[0],
+                    'Пароль': user[1],
+                    'Фамилия': user[2],
+                    'Имя': user[3],
+                    'Отчество': user[4],
+                    'Должность': determine_user_post(user[0])
+                }
+                main_screen(root)
+                mb.showinfo("Авторизация", "Авторизация прошла успешно")
+            else:
+                mb.showerror("Ошибка", "Неверный ID или пароль")
+
+
+def determine_user_post(ID):
+    first_digit = int(str(ID)[0])
+    if first_digit == 1:
+        return "Администратор"
+    elif first_digit == 2:
+        return "Преподаватель"
+    elif first_digit == 3:
+        return "Преподаватель-методист"
+    elif first_digit == 4:
+        return "Студент"
+    else:
+        return "Неизвестно"
+
+
+def main_screen(root):
+    clear_screen(root)
+    if current_user:
+        first_digit = int(str(current_user['ID'])[0])
+        if first_digit == 1:
+            admin_screan(root)
+        elif first_digit == 2:
+            teacher_screan(root)
+        elif first_digit == 3:
+            instructor_screan(root)
+        elif first_digit == 4:
+            student_screan(root)
+        else:
+            Label(root, text="Неизвестная роль").pack()
+    else:
+        Label(root, text="Неизвестная роль").pack()
+
+
+def add_user(id, password, surname, name, patronymic, post, photo_path):
+    if id and password and surname and name and patronymic and post and photo_path:
+        try:
+            with sq.connect("databaz.db") as db:
+                c = db.cursor()
+
+                # Загрузка фотографии из файла
+                with open(photo_path, 'rb') as file:
+                    photo_data = file.read()
+
+                # Вставка данных пользователя в базу данных
+                c.execute("INSERT INTO people (ID, Пароль, Фамилия, Имя, Отчество, Должность, Фотография) "
+                          "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                          (id, password, surname, name, patronymic, post, photo_data))
+
+                mb.showinfo("Успех", "Пользователь успешно добавлен!")
+        except Exception as e:
+            mb.showerror("Ошибка", f"Произошла ошибка при добавлении пользователя: {str(e)}")
+    else:
+        mb.showerror("Ошибка", "Все поля должны быть заполнены!")
+
+
+def user_add():
+    second = Toplevel()
+    Label(second, text="Добавление пользователя").pack()
+
+    Label(second, text="ID:").pack()
+    id_entry = Entry(second)
+    id_entry.pack()
+
+    Label(second, text="Пароль:").pack()
+    password_entry = Entry(second)
+    password_entry.pack()
+
+    Label(second, text="Фамилия:").pack()
+    surname_entry = Entry(second)
+    surname_entry.pack()
+
+    Label(second, text="Имя:").pack()
+    name_entry = Entry(second)
+    name_entry.pack()
+
+    Label(second, text="Отчество:").pack()
+    patronymic_entry = Entry(second)
+    patronymic_entry.pack()
+
+    Label(second, text="Фотография:").pack()
+    photo_entry = Entry(second)
+    photo_entry.pack()
+    photo_btn = Button(second, text="...", command=lambda: select_file(photo_entry))
+    photo_btn.place(x=137, y=239)
+
+    Label(second, text="Должность:").pack()
+    post_combobox = ttk.Combobox(second, values=["Администратор", "Преподаватель", "Преподаватель-инструктор", "Студент"])
+    post_combobox.pack()
+
+    Button(second, text="Добавить", command=lambda: add_user(id_entry.get(), password_entry.get(), surname_entry.get(),
+                                                           name_entry.get(),
+                                    patronymic_entry.get(), post_combobox.get(), photo_entry.get())).pack()
+
+
+def select_file(photo_entry):
+    file_path = filedialog.askopenfilename()
+
+    photo_entry.delete(0, 'end')
+    photo_entry.insert(0, file_path)
+
+
+def show_users():
+    users_window = Toplevel()
+    users_window.geometry('400x250')  # Задаем меньший размер окна
+
+    # Создаем Treeview с настройкой ширины столбцов
+    users_tree = ttk.Treeview(users_window, columns=("ID", "Фамилия", "Имя"), show='headings')
+    users_tree.column("ID", width=50)  # Задаем ширину столбца
+    users_tree.column("Фамилия", width=150)
+    users_tree.column("Имя", width=150)
+    users_tree.heading("ID", text="ID")
+    users_tree.heading("Фамилия", text="Фамилия")
+    users_tree.heading("Имя", text="Имя")
+
+    # Заполняем данными
+    with sq.connect("databaz.db") as db:
+        c = db.cursor()
+        c.execute("SELECT * FROM people")
+        users = c.fetchall()
+        for user in users:
+            users_tree.insert("", "end", values=(user[0], user[3], user[4]))
+
+    users_tree.pack()  # Позволяем этому виджету заполнить все доступное пространство
+
+    # Функция для удаления выбранного пользователя
+    def delete_selected_user():
+        selected_item = users_tree.selection()[0]  # Получаем выбранный элемент
+        user_details = users_tree.item(selected_item)['values']  # Получаем детали пользователя
+        user_id = user_details[0]  # Получаем ID пользователя
+
+        # Создаем окно подтверждения
+        confirm_window = Toplevel(users_window)
+        confirm_window.title("Подтверждение удаления")
+        confirm_window.geometry("300x150")
+
+        Label(confirm_window, text=f"Вы точно хотите удалить следующую запись?\nID: {user_id}\nФамилия: {user_details[1]}\nИмя: {user_details[2]}").pack(pady=10)
+
+        def confirm_delete():
+            users_tree.delete(selected_item)  # Удаляем элемент из Treeview
+            with sq.connect("databaz.db") as db:  # Удаляем пользователя из базы данных
+                c = db.cursor()
+                c.execute("DELETE FROM people WHERE ID=?", (user_id,))
+                db.commit()
+            confirm_window.destroy()
+
+        Button(confirm_window, text="Удалить", command=confirm_delete).pack(side=LEFT, padx=20, pady=10)
+        Button(confirm_window, text="Отмена", command=confirm_window.destroy).pack(side=RIGHT, padx=20, pady=10)
+
+    delete_button = Button(users_window, text="Удалить", command=delete_selected_user)
+    delete_button.pack()
+
+
+def admin_screan(root):
+    clear_screen(root)
+    root.title("Меню администратора")
+    Label(root, text="Профиль администратора").pack()
+    #Приветстиве
+    with sq.connect("databaz.db") as db:
+        c = db.cursor()
+        c.execute("SELECT Фамилия, Имя, Отчество, Фотография FROM people WHERE ID = ?", (current_user['ID'],))
+        user_info = c.fetchone()
+
+    full_name = f"{user_info[0]} {user_info[1]} {user_info[2]}"
+
+    try:
+        photo = Image.open(BytesIO(user_info[3]))
+    except PIL.UnidentifiedImageError:
+        print("Unable to open image")
+        photo = None
+
+    Label(root, text=f"Добро пожаловать, {full_name}!").pack()
+
+    if photo is not None:
+        photo_frame = Frame(root)
+        photo_frame.pack()
+        photo_label = Label(photo_frame)
+        photo_label.pack()
+        photo_image = ImageTk.PhotoImage(photo)
+        photo_label.config(image=photo_image)
+        photo_label.image = photo_image
+    #Приветстиве
+    menu_admin = Menu(root)
+    root.config(menu=menu_admin)
+    submenu_admin = Menu(menu_admin, tearoff=0)
+    menu_admin.add_cascade(label='Управление пользователями', menu=submenu_admin)
+    submenu_admin.add_command(label='Добавить пользователя', command=user_add)
+    submenu_admin.add_command(label='Удалить пользователя', command=show_users)
+    submenu_admin.add_command(label='Просмотр пользователей', command=view_user)
+    menu_admin.add_command(label='Календарь', command=open_calendar)
+    menu_admin.add_command(label='Памятка', command=the_memo)
+
+    # Добавляем кнопку выхода из аккаунта
+    logout_button = Button(root, text="Выйти", command=lambda: logout(root))
+    logout_button.place(relx=1.0, rely=0.0, anchor='ne')
+
+
+def view_user():
+    v_user = Toplevel()
+    v_user.title('Просмотр всех пользователей')
+
+    with sq.connect("databaz.db") as db:
+        c = db.cursor()
+        c.execute("SELECT ID, Фотография, Фамилия, Имя, Отчество, Должность FROM people")
+        selected_rows = c.fetchall()  # Получаем все выбранные строки
+
+    view_tree = ttk.Treeview(v_user, columns=("ID", "Фотография", "Фамилия", "Имя", "Отчество", "Должность"), show='headings')
+
+    # Настройка столбцов и заголовков Treeview
+    view_tree.column("#1", width=35, stretch=False)
+    view_tree.heading("#1", text="ID")
+    view_tree.column("#2", width=120)
+    view_tree.heading("#2", text="Фотография")
+    view_tree.column("#3", width=95)
+    view_tree.heading("#3", text="Фамилия")
+    view_tree.column("#4", width=95)
+    view_tree.heading("#4", text="Имя")
+    view_tree.column("#5", width=95)
+    view_tree.heading("#5", text="Отчество")
+    view_tree.column("#6", width=100)  # Ширина столбца для изображения
+    view_tree.heading("#6", text="Должность")
+
+    for row in selected_rows:
+        # Загрузка изображения из файла
+        image_path = row[1]  # Путь к файлу изображения
+        if os.path.exists(image_path):
+            image = Image.open(image_path)
+            # Изменение размера изображения, если необходимо
+            image = image.resize((80, 80))  # Измените размер по вашему усмотрению
+            # Преобразование изображения в формат, понятный Tkinter
+            image_tk = ImageTk.PhotoImage(image)
+            # Вставка изображения в Treeview
+            view_tree.insert("", "end", values=(row[0], image_tk, row[2], row[3], row[4], row[5]))
+        else:
+            # Если файл изображения не найден, вставляем пустое значение
+            view_tree.insert("", "end", values=(row[0], "", row[2], row[3], row[4], row[5]))
+
+    view_tree.pack()
+
+    Button(v_user, text="Фильтр", command=lambda: open_filter_window(view_tree, selected_rows)).pack()
+
+
+def open_filter_window(view_tree, selected_rows):
+    filter_window = Toplevel()
+    filter_window.geometry('310x180')
+    filter_window.title('Настраиваемый фильтр')
+
+    filter_label = Label(filter_window, text="Выберите критерии фильтрации:")
+    filter_label.pack()
+
+    # Dropdown for selecting the first digit of ID
+    id_label = Label(filter_window, text="Первая цифра ID:")
+    id_label.pack()
+    id_options = ["1", "2", "3", "4"]
+    id_var = StringVar()
+    id_dropdown = ttk.Combobox(filter_window, textvariable=id_var, values=id_options)
+    id_dropdown.pack()
+
+    # Entry for specifying last name
+    last_name_label = Label(filter_window, text="Фамилия:")
+    last_name_entry = Entry(filter_window)
+    last_name_label.pack()
+    last_name_entry.pack()
+
+    # Entry for specifying first name
+    first_name_label = Label(filter_window, text="Имя:")
+    first_name_entry = Entry(filter_window)
+    first_name_label.pack()
+    first_name_entry.pack()
+
+    apply_filter_button = Button(filter_window, text="Применить фильтр", command=lambda: apply_filter(view_tree, selected_rows, id_var.get(), last_name_entry.get(), first_name_entry.get()))
+    apply_filter_button.pack()
+    Button(filter_window, text="Экспортировать данные", command=lambda: complete(view_tree)).pack()
+
+
+def complete(view_tree):
+    export_window = Toplevel()
+    export_window.geometry('300x300')
+    export_window.title('Экспорт данных')
+
+    # Создание и упаковка Label и Combobox для выбора формата экспорта
+    Label(export_window, text="Выберите формат файла:").pack(pady=10)
+    format_var = StringVar()
+    format_dropdown = ttk.Combobox(export_window, textvariable=format_var, values=["TXT", "Excel"])
+    format_dropdown.pack()
+
+    # Поле для выбора директории
+    Label(export_window, text="Выберите директорию:").pack(pady=10)
+    directory_var = StringVar()
+    directory_entry = ttk.Entry(export_window, textvariable=directory_var, width=30)
+    directory_entry.pack()
+    Button(export_window, text="Выбрать директорию", command=lambda: select_directory(directory_var)).pack(pady=5)
+
+    # Поле для ввода имени файла
+    Label(export_window, text="Введите имя файла:").pack(pady=10)
+    filename_var = StringVar()
+    filename_entry = ttk.Entry(export_window, textvariable=filename_var, width=30)
+    filename_entry.pack()
+
+    # Кнопка для запуска экспорта
+    Button(export_window, text="Экспортировать", command=lambda: export_data(view_tree, format_var.get(), directory_var.get(), filename_var.get())).pack(pady=10)
+
+
+def select_directory(directory_var):
+    directory = filedialog.askdirectory()
+    directory_var.set(directory)
+
+
+def export_data(view_tree, format_choice, directory, filename):
+    # Собираем данные из Treeview
+    data = [(view_tree.item(item, "values")) for item in view_tree.get_children()]
+
+    # Полный путь к файлу
+    filepath = f"{directory}/{filename}"
+
+    # Выбор формата экспорта
+    if format_choice == 'TXT':
+        with open(f'{filepath}.txt', 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f, delimiter='\t')
+            writer.writerow(['ID', 'Фотография', 'Фамилия', 'Имя', 'Отчество', 'Должность'])
+            for row in data:
+                writer.writerow(row)
+    elif format_choice == 'Excel':
+        wb = Workbook()
+        ws = wb.active
+        ws.append(['ID', 'Фотография', 'Фамилия', 'Имя', 'Отчество', 'Должность'])
+        for row in data:
+            ws.append(row)
+        wb.save(f'{filepath}.xlsx')
+
+    print("Данные экспортированы в формате:", format_choice)
+
+
+def apply_filter(view_tree, selected_rows, id_filter, last_name_filter, first_name_filter):
+    # Clear the existing data in the Treeview
+    for item in view_tree.get_children():
+        view_tree.delete(item)
+
+    # Apply the filters and insert the filtered rows into the Treeview
+    for row in selected_rows:
+        if ((id_filter == '' or str(row[0]).startswith(id_filter)) and
+                (last_name_filter == '' or row[2].strip().casefold() == last_name_filter.strip().casefold()) and
+                (first_name_filter == '' or row[3].strip().casefold() == first_name_filter.strip().casefold())):
+            # Остальной код
+
+            image_path = row[1]  # Путь к файлу изображения
+            if os.path.exists(image_path):
+                image = Image.open(image_path)
+                image = image.resize((80, 80))  # Измените размер по вашему усмотрению
+                image_tk = ImageTk.PhotoImage(image)
+                view_tree.insert("", "end", values=(row[0], image_tk, row[2], row[3], row[4], row[5]))
+            else:
+                view_tree.insert("", "end", values=(row[0], "", row[2], row[3], row[4], row[5]))
+
+
+def open_calendar():
+    calendar_window = Toplevel()
+    calendar_window.title("Календарь")
+    #calendar_window.geometry("250x400")
+
+    cal = Calendar(calendar_window, selectmode='day', locale='ru_RU')
+    cal.pack()
+
+    event_text = Text(calendar_window, height=10, width=40)
+    event_text.pack()
+
+    Button(calendar_window, text="Назначить экзамен", command=lambda: open_event_window(event_text)).pack()
+    Button(calendar_window, text="Обновить", command=lambda: display(event_text)).pack()
+
+
+def the_memo(file_path='Meno.txt'):
+    meno_scrin = Toplevel()
+    meno_scrin.title("Памятка")
+    Label(meno_scrin, text="Памятка по добовлению пользователей").pack()
+    try:
+        with open(file_path, "r", encoding='utf-8') as file:
+            text = file.read()
+        text_field = Text(meno_scrin)
+        text_field.insert('1.0', text)
+        text_field.configure(state='disabled')
+        text_field.pack()
+    except IOError as e:
+        print(f"Ошибка при чтении файла: {e}")
+    #Button(meno_scrin, text="Вернуться", command=back).place(relx=1.0, rely=0.0, anchor='ne')
+
+
+def back():
+    clear_screen(root)
+    admin_screan(root)
+
+
+def open_event_window(event_type):
+    event_window = Toplevel()
+    event_window.title(event_type)
+
+    Label(event_window, text="Год:").pack()
+    year_entry = Entry(event_window)
+    year_entry.pack()
+
+    Label(event_window, text="Месяц:").pack()
+    month_entry = Entry(event_window)
+    month_entry.pack()
+
+    Label(event_window, text="День:").pack()
+    day_entry = Entry(event_window)
+    day_entry.pack()
+
+    Label(event_window, text="Час:").pack()
+    hour_entry = Entry(event_window)
+    hour_entry.pack()
+
+    Label(event_window, text="Минуты:").pack()
+    minutes_entry = Entry(event_window)
+    minutes_entry.pack()
+
+    Label(event_window, text="Тип экзамена:").pack()
+    nameex_combobox = ttk.Combobox(event_window, values=[
+        "1. Первая контрольная точка",
+        "2. Вторая контрольная точка",
+        "3. Третья контрольная точка",
+        "4. Четвретая контрольная точка",
+        "5. Внутренний экзамен",
+        "6. Экзамен в ГАИ"
+    ])
+    nameex_combobox.pack()
+
+    def add_date():
+        year = year_entry.get()
+        month = month_entry.get()
+        day = day_entry.get()
+        hour = hour_entry.get()
+        minutes = minutes_entry.get()
+        nameex = nameex_combobox.get()
+
+        # Проверка заполнения всех полей
+        if not year or not month or not day or not hour or not minutes or not nameex:
+            mb.showerror("Ошибка", "Пожалуйста, заполните все поля.")
+            return
+
+        # Обработка значений для получения формата YYYYMMDDHHMM
+        date = year + month + day + hour + minutes
+        if int(month) > 12 and int(day) > 31 and int(hour) > 24 and int(minutes) > 60:
+            mb.showerror("Ошибка", "Проверьте вводимые данны, а конкретно, 'месяц', 'день', 'часы' и 'минуты'")
+        else:
+            with sq.connect("databaz.db") as db:
+                c = db.cursor()
+                c.execute("INSERT INTO time (Название_экзамена, Дата) VALUES (?, ?)",
+                          (nameex, date))
+
+            mb.showinfo("Успех", "Данные успешно добавлены.")
+            display(event_text)
+    Button(event_window, text="Добавить", command=add_date).pack()
+
+
+def display(event_text):
+    # Очистка текстового поля
+    event_text.delete(1.0, END)
+
+    # Извлечение данных из базы данных
+    conn = sq.connect("databaz.db")
+    c = conn.cursor()
+    c.execute("SELECT Название_экзамена, Дата FROM time")
+    rows = c.fetchall()
+    for row in rows:
+        name_ex = row[0]
+        date = str(row[1])  # Преобразование date в строку
+
+        # Форматирование даты и времени
+        year = date[:4]
+        month = date[4:6]
+        day = date[6:8]
+        hour = date[8:10]
+        minutes = date[10:12]
+
+        formatted_date = f"{day}.{month}.{year} {hour}:{minutes}"
+
+        # Добавление данных в текстовое поле
+        event_text.insert(END, f"{formatted_date}: {name_ex}\n")
+
+
+def teacher_screan(root):
+    clear_screen(root)
+    Label(root, text="Профиль преподавателя").pack()
+
+    # Приветстиве
+    with sq.connect("databaz.db") as db:
+        c = db.cursor()
+        c.execute("SELECT Фамилия, Имя, Отчество, Фотография FROM people WHERE ID = ?", (current_user['ID'],))
+        user_info = c.fetchone()
+
+    full_name = f"{user_info[0]} {user_info[1]} {user_info[2]}"
+
+    try:
+        photo = Image.open(BytesIO(user_info[3]))
+    except PIL.UnidentifiedImageError:
+        print("Unable to open image")
+        photo = None
+
+    Label(root, text=f"Добро пожаловать, {full_name}!").pack()
+
+    if photo is not None:
+        photo_frame = Frame(root, width=2, height=2)
+        photo_frame.pack()
+        photo_label = Label(photo_frame)
+        photo_label.pack()
+        photo_image = ImageTk.PhotoImage(photo)
+        photo_label.config(image=photo_image)
+        photo_label.image = photo_image
+    #Приветстиве
+    menu_teacher = Menu(root)
+    root.config(menu=menu_teacher)
+    submenu_teacher = Menu(menu_teacher, tearoff=0)
+    menu_teacher.add_cascade(label='Действия с учениками', menu=submenu_teacher)
+    submenu_teacher.add_command(label='Просмотр учеников', command=view)
+    submenu_teacher.add_command(label='Отметка контрольных точек')
+    menu_teacher.add_command(label='Календарь', command=open_calendar)
+    menu_teacher.add_command(label='Памятка', command=the_memo)
+
+    # Добавляем кнопку выхода из аккаунта
+    logout_button = Button(root, text="Выйти", command=lambda: logout(root))
+    logout_button.place(relx=1.0, rely=0.0, anchor='ne')
+
+
+def selection_from_database_and_update_tree():
+    with sq.connect("databaz.db") as db:
+        c = db.cursor()
+        c.execute("SELECT ID, Фамилия, Имя, Отчество FROM people WHERE ID LIKE '4%'")
+        selected_rows = c.fetchall()
+
+        c.execute("SELECT COUNT(*) FROM student")
+        result = c.fetchone()
+        if result[0] == 0:
+            for row in selected_rows:
+                c.execute("""
+                    INSERT INTO student (ID, Фамилия, Имя, Отчество, Первая_контрольная_точка, Вторая_контрольная_точка, 
+                    Третья_контрольная_точка, Четвертая_контрольная_точка, Внутренний_экзамен, Экзамен_в_ГАИ)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    row[0], row[1], row[2], row[3], "Не сдал", "Не сдал", "Не сдал", "Не сдал", "Не сдал", "Не сдал"
+                ))
+
+        db.commit()
+
+    update_tree()
+
+
+def create_view_window():
+    global view_top, user_tree
+    view_top = Toplevel()
+    view_top.title("Просмотр")
+    view_top.geometry('1410x400')
+
+    user_tree = ttk.Treeview(view_top, columns=("ID", "Фамилия", "Имя", "Отчество", "Первая контрольная точка",
+                                                "Вторая контрольная точка", "Третья контрольная точка",
+                                                "Четвертая контрольная точка", "Внутренний экзамен", "Экзамен в ГАИ"), show='headings')
+    user_tree.column("#1", width=35, stretch=False)
+    user_tree.heading("#1", text="ID")
+    user_tree.column("#2", width=90)
+    user_tree.heading("#2", text="Фамилия")
+    user_tree.column("#3", width=90)
+    user_tree.heading("#3", text="Имя")
+    user_tree.column("#4", width=90)
+    user_tree.heading("#4", text="Отчество")
+    user_tree.column("#5", width=200)
+    user_tree.heading("#5", text="Первая контрольная точка")
+    user_tree.column("#6", width=200)
+    user_tree.heading("#6", text="Вторая контрольная точка")
+    user_tree.column("#7", width=200)
+    user_tree.heading("#7", text="Третья контрольная точка")
+    user_tree.column("#8", width=200)
+    user_tree.heading("#8", text="Четвертая контрольная точка")
+    user_tree.column("#9", width=150)
+    user_tree.heading("#9", text="Внутренний экзамен")
+    user_tree.column("#10", width=150)
+    user_tree.heading("#10", text="Экзамен в ГАИ")
+    user_tree.pack()
+
+    Button(view_top, text="Выбрать", command=lambda: marking_points(user_tree, view_top)).pack()
+
+
+def update_tree():
+    # Очистка текущих данных в дереве
+    for item in user_tree.get_children():
+        user_tree.delete(item)
+
+    # Загрузка новых данных в дерево
+    with sq.connect("databaz.db") as db:
+        c = db.cursor()
+        c.execute("SELECT * FROM student")
+        rows = c.fetchall()
+
+        for row in rows:
+            user_tree.insert("", "end", values=row)
+
+
+def marking_points(user_tree, view_top):
+    selected_item = user_tree.selection()[0]  # Получаем выбранный элемент
+    user_details = user_tree.item(selected_item)['values']  # Получаем детали пользователя
+    user_id = user_details[0]  # Получаем ID пользователя
+    user_name = f'{user_details[1]} {user_details[2]}'
+
+    add_mark = Toplevel()
+    add_mark.title('Отметка')
+    add_mark.geometry('320x200')
+
+    Label(add_mark, text=f"Выбран ученик {user_name}").pack()
+    lbl1 = Label(add_mark, text="Первая контрольная точка")
+    lbl1.place(x=0, y=20)
+    combo1 = ttk.Combobox(add_mark)
+    combo1.place(x=168, y=20)
+    combo1['values'] = ('Сдал', 'Не сдал')
+    lbl2 = Label(add_mark, text="Вторая контрольная точка")
+    lbl2.place(x=0, y=40)
+    combo2 = ttk.Combobox(add_mark)
+    combo2.place(x=168, y=40)
+    combo2['values'] = ('Сдал', 'Не сдал')
+    lbl3 = Label(add_mark, text="Третья контрольная точка")
+    lbl3.place(x=0, y=60)
+    combo3 = ttk.Combobox(add_mark)
+    combo3.place(x=168, y=60)
+    combo3['values'] = ('Сдал', 'Не сдал')
+    lbl4 = Label(add_mark, text="Четвертая контрольная точка")
+    lbl4.place(x=0, y=80)
+    combo4 = ttk.Combobox(add_mark)
+    combo4.place(x=168, y=80)
+    combo4['values'] = ('Сдал', 'Не сдал')
+    lbl5 = Label(add_mark, text="Внутренний экзамен")
+    lbl5.place(x=0, y=100)
+    combo5 = ttk.Combobox(add_mark)
+    combo5.place(x=168, y=100)
+    combo5['values'] = ('Сдал', 'Не сдал')
+    lbl6 = Label(add_mark, text="Экзамен в ГАИ")
+    lbl6.place(x=0, y=120)
+    combo6 = ttk.Combobox(add_mark)
+    combo6.place(x=168, y=120)
+    combo6['values'] = ('Сдал', 'Не сдал')
+
+    def insert_and_update_students():
+        with sq.connect("databaz.db") as db:
+            c = db.cursor()
+            c.execute("""
+                UPDATE student
+                SET 
+                    Первая_контрольная_точка = ?,
+                    Вторая_контрольная_точка = ?,
+                    Третья_контрольная_точка = ?,
+                    Четвертая_контрольная_точка = ?,
+                    Внутренний_экзамен = ?,
+                    Экзамен_в_ГАИ = ?
+                WHERE ID = ?
+            """, (
+                combo1.get(),
+                combo2.get(),
+                combo3.get(),
+                combo4.get(),
+                combo5.get(),
+                combo6.get(),
+                user_id
+            ))
+
+            db.commit()
+
+        update_tree()
+
+    Button(add_mark, text="Добавить и обновить", command=insert_and_update_students).place(x=125, y=170)
+
+
+def view():
+    create_view_window()
+    selection_from_database_and_update_tree()
+
+
+def instructor_screan(root):
+    clear_screen(root)
+    Label(root, text="Профиль преподавателя-инструктора").pack()
+
+    with sq.connect("databaz.db") as db:
+        c = db.cursor()
+        c.execute("SELECT Фамилия, Имя, Отчество, Фотография FROM people WHERE ID = ?", (current_user['ID'],))
+        user_info = c.fetchone()
+
+    full_name = f"{user_info[0]} {user_info[1]} {user_info[2]}"
+
+    try:
+        photo = Image.open(BytesIO(user_info[3]))
+    except PIL.UnidentifiedImageError:
+        print("Unable to open image")
+        photo = None
+
+    Label(root, text=f"Добро пожаловать, {full_name}!").pack()
+
+    if photo is not None:
+        photo_frame = Frame(root)
+        photo_frame.pack()
+        photo_label = Label(photo_frame)
+        photo_label.pack()
+        photo_image = ImageTk.PhotoImage(photo)
+        photo_label.config(image=photo_image)
+        photo_label.image = photo_image
+
+    # Добавляем кнопку выхода из аккаунта
+    logout_button = Button(root, text="Выйти", command=lambda: logout(root))
+    logout_button.place(relx=1.0, rely=0.0, anchor='ne')
+
+
+def student_screan(root):
+    clear_screen(root)
+    Label(root, text="Профиль студента").pack()
+
+    with sq.connect("databaz.db") as db:
+        c = db.cursor()
+        c.execute("SELECT F, I, O, photo FROM people WHERE ID = ?", (current_user['ID'],))
+        user_info = c.fetchone()
+
+    full_name = f"{user_info[0]} {user_info[1]} {user_info[2]}"
+
+    try:
+        photo = Image.open(BytesIO(user_info[3]))
+    except PIL.UnidentifiedImageError:
+        print("Unable to open image")
+        photo = None
+
+    Label(root, text=f"Добро пожаловать, {full_name}!").pack()
+
+    if photo is not None:
+        photo_frame = Frame(root, width=5, height=5)
+        photo_frame.pack()
+        photo_label = Label(photo_frame)
+        photo_label.pack()
+        photo_image = ImageTk.PhotoImage(photo)
+        photo_label.config(image=photo_image)
+        photo_label.image = photo_image
+
+    # Добавляем кнопку выхода из аккаунта
+    logout_button = Button(root, text="Выйти", command=lambda: logout(root))
+    logout_button.place(relx=1.0, rely=0.0, anchor='ne')
+
+
+def logout(root):
+    global current_user
+    current_user = None
+    login_screan(root)
+
+
+def clear_screen(root):
+    for widget in root.winfo_children():
+        widget.destroy()
+
+
+if __name__ == "__main__":
+    root = Tk()
+    root.title('Авторизация')
+    root.geometry('400x300')
+    root.iconbitmap('Автошколакамикадзе.ico')
+    login_screan(root)
+
+    root.mainloop()
